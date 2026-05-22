@@ -1,4 +1,14 @@
 # 🎬 Huobao Drama - AI 短剧生成平台
+## 安装启动说明
+1.前端项目，不要使用pnpm，使用npm安装
+```bash
+
+
+```
+
+
+
+
 
 <div align="center">
 
