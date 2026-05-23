@@ -115,6 +115,67 @@
             </div>
           </section>
         </div>
+
+        <!-- Voice Browser -->
+        <section class="voice-browser card" v-if="byType('audio').some(c => c.is_active)">
+          <div class="section-head">
+            <div>
+              <span class="section-title">音色试听</span>
+              <div class="section-subtitle">选择已启用的音频服务，试听可用音色</div>
+            </div>
+            <select v-model="voiceProvider" class="input" style="width:auto;padding:5px 10px;font-size:12px">
+              <option value="">选择音频服务</option>
+              <option v-for="c in byType('audio').filter(c => c.is_active)" :key="c.id" :value="c.provider">{{ c.provider }} {{ c.settings?.default_voice ? "(默认:" + c.settings.default_voice + ")" : "" }}</option>
+            </select>
+          </div>
+          <div v-if="voiceProvider === 'edge-tts'" class="voice-grid">
+            <div v-if="edgeTtsLoading" class="config-empty">正在加载音色列表...</div>
+            <div
+              v-for="v in edgeTtsVoices"
+              :key="v.ShortName"
+              class="voice-chip"
+              @click="previewEdgeTts(v)"
+            >
+              <span :class="['voice-chip-badge', { active: audioDefaultVoice === v.ShortName }]" @click.stop="setDefaultVoice(v.ShortName)" title="设为默认配音音色">★</span>
+              <span class="voice-chip-name">{{ v.DisplayName || v.ShortName }}</span>
+              <span class="voice-chip-lang">{{ v.Locale }}</span>
+              <span class="voice-chip-gender">{{ v.Gender }}</span>
+              <button class="btn btn-ghost btn-icon" :disabled="edgeTtsPlaying === v.ShortName" @click.stop="previewEdgeTts(v)">
+                <Loader2 v-if="edgeTtsPlaying === v.ShortName" :size="11" class="animate-spin" />
+                <svg v-else viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+            </div>
+            <div v-if="!edgeTtsVoices.length && !edgeTtsLoading" class="config-empty">
+              <button class="btn btn-ghost btn-sm" @click="loadEdgeTtsVoices"><span>加载音色列表</span></button>
+            </div>
+          </div>
+          <div v-else-if="voiceProvider && serverVoiceProviders.includes(voiceProvider)" class="voice-grid">
+            <div class="voice-grid-toolbar">
+              <span class="dim" style="font-size:12px">服务端音色，共 {{ serverVoices.length }} 个</span>
+              <button class="btn btn-ghost btn-sm" :disabled="serverVoicesSyncing" @click="syncServerVoices">
+                <Loader2 v-if="serverVoicesSyncing" :size="11" class="animate-spin" />
+                <span v-else>同步音色</span>
+              </button>
+            </div>
+            <div v-if="serverVoicesLoading" class="config-empty">正在加载音色列表...</div>
+            <div
+              v-for="v in serverVoices"
+              :key="v.voice_id"
+              class="voice-chip"
+            >
+              <span :class="['voice-chip-badge', { active: audioDefaultVoice === v.voice_id }]" @click.stop="setDefaultVoice(v.voice_id)" title="设为默认配音音色">★</span>
+              <span class="voice-chip-name">{{ v.voice_name }}</span>
+              <span class="voice-chip-lang">{{ v.language }}</span>
+            </div>
+            <div v-if="!serverVoices.length && !serverVoicesLoading" class="config-empty">
+              暂无音色数据，点击「同步音色」从服务端获取
+            </div>
+          </div>
+          <div v-else-if="voiceProvider" class="config-empty" style="padding:24px">
+            该服务的音色列表需要从服务端同步，请在工作台音色分配模块使用。
+          </div>
+          <div v-else class="config-empty" style="padding:24px">请先选择上方已启用的音频服务</div>
+        </section>
       </div>
 
       <!-- ===== Agent 配置 ===== -->
@@ -304,20 +365,51 @@
           <input v-model.number="cfgForm.priority" class="input" type="number" min="0" max="999" />
           <span class="field-hint">数值越高越优先。工作台默认会优先使用同类型里优先级最高的启用配置。</span>
         </label>
-        <label class="field"><span class="field-label">API Key</span><input v-model="cfgForm.api_key" class="input" type="password" placeholder="sk-..." /></label>
-        <label class="field"><span class="field-label">Base URL</span><input v-model="cfgForm.base_url" class="input" placeholder="https://..." /></label>
-        <div class="endpoint-hint">
+        <label v-if="!isEdgeTts" class="field"><span class="field-label">{{ isKling ? 'Access Key' : 'API Key' }}</span><input v-model="cfgForm.api_key" class="input" type="password" placeholder="sk-..." /></label>
+        <div v-else class="field"><span class="field-label">Edge TTS</span><div class="input" style="background:var(--bg-2);color:var(--text-3);cursor:default;padding:7px 12px;font-size:12px;border-radius:var(--radius);border:1px dashed var(--border)">免费服务，无需 API Key</div></div>
+        <label v-if="isKling" class="field"><span class="field-label">Secret Key</span><input v-model="cfgForm.secretKey" class="input" type="password" placeholder="Kling Secret Key" /></label>
+        <label v-if="!isEdgeTts" class="field"><span class="field-label">Base URL</span><input v-model="cfgForm.base_url" class="input" placeholder="https://..." /></label>
+        <div v-if="!isEdgeTts" class="endpoint-hint">
           <span class="dim">实际端点前缀：</span>
           <span class="mono">{{ endpointHint }}</span>
         </div>
-        <label class="field"><span class="field-label">模型（逗号分隔）</span><input v-model="cfgForm.modelStr" class="input" placeholder="model-name" /></label>
+        <label v-if="!isEdgeTts" class="field"><span class="field-label">模型（逗号分隔）</span><input v-model="cfgForm.modelStr" class="input" placeholder="model-name" /></label>
         <div v-if="cfgTestResult" class="test-result" :class="{ ok: cfgTestResult.reachable, bad: !cfgTestResult.reachable }">
           <div class="test-result-head">
             <span class="tag" :class="cfgTestResult.reachable ? 'tag-success' : 'tag-error'">{{ cfgTestResult.status || 'ERROR' }}</span>
             <span>{{ cfgTestResult.message }}</span>
           </div>
-          <div class="mono test-result-url">{{ cfgTestResult.method }} {{ cfgTestResult.url }}</div>
+          <div v-if="cfgTestResult.url" class="mono test-result-url">{{ cfgTestResult.method }} {{ cfgTestResult.url }}</div>
           <div v-if="cfgTestResult.response_preview" class="mono test-result-preview">{{ cfgTestResult.response_preview }}</div>
+          <!-- Edge-TTS voice preview after test -->
+          <div v-if="isEdgeTts && edgeTtsTestVoices.length" class="voice-grid" style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+            <div class="dim" style="font-size:11px;width:100%;margin-bottom:4px">试听音色（点击★设为默认配音音色）</div>
+            <div
+              v-for="v in edgeTtsTestVoices"
+              :key="v.ShortName"
+              class="voice-chip"
+              @click="previewEdgeTtsFromTest(v)"
+            >
+              <span :class="['voice-chip-badge', { active: cfgForm.defaultVoice === v.ShortName }]" @click.stop="cfgForm.defaultVoice = v.ShortName; toast.info('默认音色已选: ' + v.ShortName)" title="设为默认配音音色">★</span>
+              <span class="voice-chip-name">{{ v.DisplayName || v.ShortName }}</span>
+              <span class="voice-chip-lang">{{ v.Locale }}</span>
+              <span class="voice-chip-gender">{{ v.Gender }}</span>
+              <button class="btn btn-ghost btn-icon" :disabled="edgeTtsTestPlaying === v.ShortName" @click.stop="previewEdgeTtsFromTest(v)">
+                <Loader2 v-if="edgeTtsTestPlaying === v.ShortName" :size="11" class="animate-spin" />
+                <svg v-else viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+            </div>
+          </div>
+          <div v-if="isEdgeTts" style="margin-top:8px;display:flex;gap:6px">
+            <span class="dim" style="font-size:10px;line-height:24px">服务器 WebSocket 连接：</span>
+            <button class="btn btn-ghost btn-sm" :disabled="wsTesting" @click="testEdgeTtsWs">
+              <Loader2 v-if="wsTesting" :size="11" class="animate-spin" />
+              <span v-else>测试连接</span>
+            </button>
+            <span v-if="wsTestResult" class="tag" :class="wsTestResult.ok ? 'tag-success' : 'tag-error'" style="font-size:10px">
+              {{ wsTestResult.ok ? `${wsTestResult.ms}ms ✓` : wsTestResult.error || '失败' }}
+            </span>
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" :disabled="cfgTesting" @click="testDraftCfg">
@@ -394,7 +486,7 @@
 import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
 import { toast } from 'vue-sonner'
-import { aiConfigAPI, agentConfigAPI, skillsAPI } from '~/composables/useApi'
+import { aiConfigAPI, agentConfigAPI, skillsAPI, voicesAPI, api } from '~/composables/useApi'
 import brandLogo from '~/assets/huobao-logo.png'
 
 const showBrandImage = ref(true)
@@ -418,10 +510,10 @@ const cfgEditId = ref(null)
 const presetDialog = ref(false)
 const cfgTesting = ref(false)
 const cfgTestResult = ref(null)
-const cfgForm = reactive({ name: '', provider: '', api_key: '', base_url: '', modelStr: '', service_type: 'text', priority: 0 })
+const cfgForm = reactive({ name: '', provider: '', api_key: '', secretKey: '', base_url: '', modelStr: '', service_type: 'text', priority: 0, defaultVoice: '' })
 const huobaoForm = reactive({ apiKey: '' })
 const serviceTypes = [{ type: 'text', label: '文本' }, { type: 'image', label: '图片' }, { type: 'video', label: '视频' }, { type: 'audio', label: '音频' }]
-const providers = ['ali', 'chatfire', 'gemini', 'minimax', 'openai', 'openrouter', 'vidu', 'volcengine']
+const providers = ['ali', 'ali-tts', 'bailian', 'chatfire', 'deepseek', 'edge-tts', 'gemini', 'kling', 'minimax', 'moonshot', 'openai', 'openrouter', 'tencent-tts', 'vidu', 'volcengine']
 const providerSelectOptions = computed(() => providers.map(p => ({ label: p, value: p })))
 const serviceMeta = {
   text: { label: '文本', desc: '剧本改写、角色场景提取、分镜拆解等 Agent 文本能力' },
@@ -434,19 +526,28 @@ const providerPresets = {
     chatfire: { label: 'ChatFire 推荐', baseUrl: 'https://api.chatfire.site', models: ['gemini-3-pro-preview'] },
     openrouter: { label: 'OpenRouter 推荐', baseUrl: 'https://openrouter.ai/api', models: ['google/gemini-3-flash-preview'] },
     openai: { label: 'OpenAI 推荐', baseUrl: 'https://api.openai.com', models: ['gpt-4.1-mini'] },
+    deepseek: { label: 'DeepSeek 推荐', baseUrl: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner'] },
+    moonshot: { label: 'Kimi 推荐', baseUrl: 'https://api.moonshot.cn', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
+    bailian: { label: '百炼推荐', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode', models: ['qwen-plus', 'qwen-max-2025-04-25', 'qwen-turbo'] },
   },
   image: {
     chatfire: { label: 'ChatFire 推荐', baseUrl: 'https://api.chatfire.site', models: ['doubao-seedream-4-5-251128'] },
     gemini: { label: 'Gemini 推荐', baseUrl: 'https://api.chatfire.site', models: ['gemini-3-pro-image-preview'] },
     volcengine: { label: '火山推荐', baseUrl: 'https://ark.cn-beijing.volces.com', models: ['doubao-seedream-4-0-250828'] },
+    bailian: { label: '百炼推荐', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode', models: ['qwen-vl-max', 'qwen-vl-plus', 'qwen2.5-vl-72b'] },
   },
   video: {
     volcengine: { label: '火宝视频', baseUrl: 'https://api.chatfire.site/volcengine', models: ['doubao-seedance-1-5-pro-251215'] },
     vidu: { label: 'Vidu 推荐', baseUrl: 'https://api.vidu.com', models: ['viduq3-turbo'] },
     ali: { label: '阿里推荐', baseUrl: 'https://dashscope.aliyuncs.com', models: ['wan2.6-i2v-flash'] },
+    kling: { label: '可灵推荐', baseUrl: 'https://api.klingai.com', models: ['kling-v1-6'] },
+    bailian: { label: '百炼推荐', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode', models: ['wan2.1-i2v-turbo', 'wan2.1-t2v-turbo'] },
   },
   audio: {
     minimax: { label: '火宝音频', baseUrl: 'https://api.chatfire.site/minimax', models: ['speech-2.8-hd'] },
+    'edge-tts': { label: 'Edge TTS（免费）', baseUrl: '', models: ['edge-tts'] },
+    'tencent-tts': { label: '腾讯云 TTS', baseUrl: 'https://tts.tencentcloudapi.com', models: ['cosyvoice-v1'] },
+    'ali-tts': { label: '阿里云 TTS', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode', models: ['cosyvoice-v1'] },
   },
 }
 const huobaoPresetCards = [
@@ -464,6 +565,13 @@ const endpointPrefixes = {
   volcengine: '/api/v3',
   ali: '/api/v1',
   vidu: '/ent/v2',
+  deepseek: '/v1',
+  moonshot: '/v1',
+  bailian: '/v1',
+  kling: '/v1',
+  'edge-tts': '',
+  'tencent-tts': '/',
+  'ali-tts': '/v1',
 }
 
 const endpointHint = computed(() => {
@@ -473,6 +581,13 @@ const endpointHint = computed(() => {
   if (!provider) return '选择服务商后显示推荐端点前缀'
   return `${base}${prefix}`
 })
+
+const isKling = computed(() => cfgForm.provider === 'kling')
+const isEdgeTts = computed(() => cfgForm.provider === 'edge-tts')
+const edgeTtsTestVoices = ref([])
+const edgeTtsTestPlaying = ref(null)
+const wsTesting = ref(false)
+const wsTestResult = ref(null)
 
 function byType(t) { return cfgs.value.filter(c => c.service_type === t) }
 function countActive(t) { return byType(t).filter(c => c.is_active).length }
@@ -496,7 +611,8 @@ async function delCfg(id) { await aiConfigAPI.del(id); toast.success('已删除'
 function startAddCfg(t) {
   cfgEditId.value = null
   cfgTestResult.value = null
-  Object.assign(cfgForm, { name: '', provider: '', api_key: '', base_url: '', modelStr: '', service_type: t, priority: 0 })
+  edgeTtsTestVoices.value = []
+  Object.assign(cfgForm, { name: '', provider: '', api_key: '', secretKey: '', base_url: '', modelStr: '', service_type: t, priority: 0 })
   const firstPreset = presetsByType(t)[0]
   if (firstPreset) applyProviderPreset(t, firstPreset.provider)
   cfgDialog.value = true
@@ -504,14 +620,17 @@ function startAddCfg(t) {
 function startEditCfg(c) {
   cfgEditId.value = c.id
   cfgTestResult.value = null
+  edgeTtsTestVoices.value = []
   Object.assign(cfgForm, {
     name: c.name || '',
     provider: c.provider,
     api_key: c.api_key || '',
+    secretKey: c.settings?.secret_key || '',
     base_url: c.base_url || '',
     modelStr: fmtModel(c.model),
     service_type: c.service_type,
     priority: c.priority ?? 0,
+    defaultVoice: c.settings?.default_voice || '',
   })
   cfgDialog.value = true
 }
@@ -528,30 +647,137 @@ async function testCfgPayload(payload) {
   }
 }
 async function testDraftCfg() {
-  await testCfgPayload({
+  if (isEdgeTts.value) {
+    // Edge-TTS: test client-side by loading voices
+    cfgTesting.value = true
+    edgeTtsTestVoices.value = []
+    try {
+      const { listVoices } = await import('edge-tts-universal')
+      const voices = await listVoices()
+      edgeTtsTestVoices.value = voices
+      cfgTestResult.value = {
+        reachable: true,
+        status: 200,
+        status_text: 'OK',
+        message: `Edge TTS 免费服务正常，已加载 ${voices.length} 个音色`,
+        method: 'BROWSER',
+        url: 'edge-tts-universal (客户端)',
+        response_preview: '',
+      }
+      toast.success(`Edge TTS 可用，共 ${voices.length} 个音色`)
+    } catch (e) {
+      cfgTestResult.value = {
+        reachable: false,
+        status: 0,
+        status_text: 'ERROR',
+        message: 'Edge TTS 加载失败: ' + e.message,
+        method: 'BROWSER',
+        url: 'edge-tts-universal (客户端)',
+        response_preview: '',
+      }
+      toast.error('Edge TTS 加载失败')
+    } finally {
+      cfgTesting.value = false
+    }
+    return
+  }
+
+  const payload = {
     service_type: cfgForm.service_type,
     provider: cfgForm.provider,
     api_key: cfgForm.api_key,
     base_url: cfgForm.base_url,
     model: cfgForm.modelStr.split(',').map(s => s.trim()).filter(Boolean),
-  })
+  }
+  if (cfgForm.secretKey) payload.secret_key = cfgForm.secretKey
+  await testCfgPayload(payload)
 }
 async function testExistingCfg(c) {
   startEditCfg(c)
-  await testCfgPayload({
+  if (c.provider === 'edge-tts') {
+    await testDraftCfg()
+    return
+  }
+  const payload = {
     service_type: c.service_type,
     provider: c.provider,
     api_key: c.api_key || '',
     base_url: c.base_url || '',
     model: Array.isArray(c.model) ? c.model : [],
-  })
+  }
+  if (c.settings?.secret_key) payload.secret_key = c.settings.secret_key
+  await testCfgPayload(payload)
+}
+
+async function previewEdgeTtsFromTest(voice) {
+  try {
+    edgeTtsTestPlaying.value = voice.ShortName
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+    const resp = await fetch('/api/v1/ai-voices/edge-tts/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: '你是我是智能助手。',
+        voice: voice.ShortName,
+      }),
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '')
+      let msg = '合成失败'
+      try { const err = JSON.parse(text); msg = err.message || msg } catch { msg = text || msg }
+      throw new Error(`${msg} (HTTP ${resp.status})`)
+    }
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    audio.onended = () => { URL.revokeObjectURL(url); edgeTtsTestPlaying.value = null }
+    audio.onerror = () => { URL.revokeObjectURL(url); edgeTtsTestPlaying.value = null }
+    await audio.play().catch(() => {
+      const retry = () => {
+        audio.play().then(() => {
+          document.removeEventListener('click', retry)
+          document.removeEventListener('touchstart', retry)
+        }).catch(() => {})
+      }
+      document.addEventListener('click', retry, { once: true })
+      document.addEventListener('touchstart', retry, { once: true })
+      toast.info('点击页面任意位置播放试听')
+    })
+  } catch (e) {
+    toast.error('试听失败: ' + e.message)
+    edgeTtsTestPlaying.value = null
+  }
+}
+
+async function testEdgeTtsWs() {
+  wsTesting.value = true
+  wsTestResult.value = null
+  try {
+    const resp = await fetch('/api/v1/ai-voices/edge-tts/test-ws', { method: 'POST' })
+    const json = await resp.json()
+    wsTestResult.value = json.data || json
+    if (wsTestResult.value.ok) toast.success(`WebSocket 连接正常 (${wsTestResult.value.ms}ms)`)
+    else toast.warning(`连接失败: ${wsTestResult.value.error || '未知错误'}`)
+  } catch (e) {
+    wsTestResult.value = { ok: false, error: e.message }
+    toast.error('测试请求失败: ' + e.message)
+  } finally {
+    wsTesting.value = false
+  }
 }
 async function saveCfg() {
   if (!cfgForm.provider) { toast.warning('选择服务商'); return }
   const models = cfgForm.modelStr.split(',').map(s => s.trim()).filter(Boolean)
+  const settings = {}
+  if (cfgForm.secretKey) settings.secret_key = cfgForm.secretKey
+  if (cfgForm.defaultVoice) settings.default_voice = cfgForm.defaultVoice
+  const settingsArg = Object.keys(settings).length ? settings : undefined
   try {
-    if (cfgEditId.value) await aiConfigAPI.update(cfgEditId.value, { name: cfgForm.name, provider: cfgForm.provider, api_key: cfgForm.api_key, base_url: cfgForm.base_url, model: models, priority: cfgForm.priority })
-    else await aiConfigAPI.create({ service_type: cfgForm.service_type, provider: cfgForm.provider, name: cfgForm.name || `${cfgForm.provider}-${cfgForm.service_type}`, api_key: cfgForm.api_key, base_url: cfgForm.base_url, model: models, priority: cfgForm.priority })
+    if (cfgEditId.value) await aiConfigAPI.update(cfgEditId.value, { name: cfgForm.name, provider: cfgForm.provider, api_key: cfgForm.api_key, base_url: cfgForm.base_url, model: models, priority: cfgForm.priority, settings: settingsArg })
+    else await aiConfigAPI.create({ service_type: cfgForm.service_type, provider: cfgForm.provider, name: cfgForm.name || `${cfgForm.provider}-${cfgForm.service_type}`, api_key: cfgForm.api_key, base_url: cfgForm.base_url, model: models, priority: cfgForm.priority, settings: settingsArg })
     cfgDialog.value = false; toast.success('已保存'); loadCfgs()
   } catch (e) { toast.error(e.message) }
 }
@@ -835,6 +1061,124 @@ async function saveSkill(id) {
   }
 }
 
+// ===== Voice Browser =====
+const voiceProvider = ref('')
+const edgeTtsVoices = ref([])
+const edgeTtsLoading = ref(false)
+const edgeTtsPlaying = ref(null)
+const serverVoices = ref([])
+const serverVoicesLoading = ref(false)
+const serverVoicesSyncing = ref(false)
+const serverVoiceProviders = ['minimax', 'tencent-tts', 'ali-tts']
+
+const audioDefaultVoice = computed(() => {
+  const cfg = byType('audio').find(c => c.provider === voiceProvider.value && c.is_active)
+  return cfg?.settings?.default_voice || ''
+})
+
+async function loadEdgeTtsVoices() {
+  edgeTtsLoading.value = true
+  try {
+    const { listVoices } = await import('edge-tts-universal')
+    edgeTtsVoices.value = await listVoices()
+  } catch (e) {
+    toast.error('加载 Edge TTS 音色失败: ' + e.message)
+  } finally {
+    edgeTtsLoading.value = false
+  }
+}
+
+async function previewEdgeTts(voice) {
+  try {
+    edgeTtsPlaying.value = voice.ShortName
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+    const resp = await fetch('/api/v1/ai-voices/edge-tts/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: '你是我是智能助手。',
+        voice: voice.ShortName,
+      }),
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '')
+      let msg = '合成失败'
+      try { const err = JSON.parse(text); msg = err.message || msg } catch { msg = text || msg }
+      throw new Error(`${msg} (HTTP ${resp.status})`)
+    }
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    audio.onended = () => { URL.revokeObjectURL(url); edgeTtsPlaying.value = null }
+    audio.onerror = () => { URL.revokeObjectURL(url); edgeTtsPlaying.value = null }
+    await audio.play().catch(() => {
+      // Autoplay blocked — retry on user gesture
+      const retry = () => {
+        audio.play().then(() => {
+          document.removeEventListener('click', retry)
+          document.removeEventListener('touchstart', retry)
+        }).catch(() => {})
+      }
+      document.addEventListener('click', retry, { once: true })
+      document.addEventListener('touchstart', retry, { once: true })
+      toast.info('点击页面任意位置播放试听')
+    })
+  } catch (e) {
+    toast.error('试听失败: ' + e.message)
+    edgeTtsPlaying.value = null
+  }
+}
+
+async function loadServerVoices(provider) {
+  serverVoicesLoading.value = true
+  try {
+    const res = await voicesAPI.list(provider)
+    serverVoices.value = res || []
+  } catch (e) {
+    toast.error('加载音色列表失败: ' + e.message)
+  } finally {
+    serverVoicesLoading.value = false
+  }
+}
+
+async function syncServerVoices() {
+  const provider = voiceProvider.value
+  if (!provider) return
+  serverVoicesSyncing.value = true
+  try {
+    const res = await api.post(`/ai-voices/sync?provider=${provider}`)
+    toast.success(res.message || '同步完成')
+    await loadServerVoices(provider)
+  } catch (e) {
+    toast.error('同步音色失败: ' + e.message)
+  } finally {
+    serverVoicesSyncing.value = false
+  }
+}
+
+async function setDefaultVoice(voiceId) {
+  const cfg = byType('audio').find(c => c.provider === voiceProvider.value && c.is_active)
+  if (!cfg) { toast.warning('未找到对应的音频配置'); return }
+  try {
+    const settings = { ...(cfg.settings || {}), default_voice: voiceId }
+    await aiConfigAPI.update(cfg.id, { settings })
+    await loadCfgs()
+    toast.success(`已设为默认配音音色: ${voiceId}`)
+  } catch (e) {
+    toast.error('设置默认音色失败: ' + e.message)
+  }
+}
+
+watch(voiceProvider, (v) => {
+  edgeTtsVoices.value = []
+  serverVoices.value = []
+  if (v === 'edge-tts') loadEdgeTtsVoices()
+  else if (serverVoiceProviders.includes(v)) loadServerVoices(v)
+})
+
 onMounted(() => { loadCfgs(); loadAgents(); loadAllSkills() })
 </script>
 
@@ -1077,6 +1421,19 @@ onMounted(() => { loadCfgs(); loadAgents(); loadAllSkills() })
 
 /* Skill */
 .skill-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* Voice Browser */
+.voice-browser { margin-top: 24px; padding: 18px; }
+.voice-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-height: 300px; overflow-y: auto; }
+.voice-chip { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; cursor: pointer; transition: 0.12s; background: rgba(255,255,255,0.72); }
+.voice-chip:hover { border-color: var(--accent); background: var(--accent-bg); }
+.voice-chip-name { font-weight: 600; color: var(--text-1); }
+.voice-chip-lang { color: var(--text-3); font-size: 10px; }
+.voice-chip-gender { color: var(--text-2); font-size: 10px; }
+.voice-chip-badge { cursor: pointer; font-size: 13px; color: var(--text-3); transition: 0.12s; user-select: none; line-height: 1; }
+.voice-chip-badge:hover { color: #f5a623; transform: scale(1.2); }
+.voice-chip-badge.active { color: #f5a623; }
+.voice-grid-toolbar { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 4px 2px; }
 .skill-card { overflow: hidden; }
 .skill-card-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; transition: background 0.1s; }
 .skill-card-head:hover { background: var(--bg-hover); }

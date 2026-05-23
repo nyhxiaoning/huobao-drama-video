@@ -838,7 +838,41 @@
               <div class="empty-desc">先在分镜里填写“角色名：台词”或“旁白：文案”，这里就会出现待生成的语音镜头。</div>
             </div>
 
-            <div v-else class="dub-grid">
+            <template v-else>
+              <!-- Voice Palette Panel -->
+              <div class="dub-voice-palette">
+                <div class="dub-voice-palette-head">
+                  <span class="dim" style="font-size:11px">音色列表</span>
+                  <div class="dub-voice-toggle">
+                    <button
+                      class="btn btn-ghost btn-xs"
+                      :class="dubVoiceProviderMode === 'current' && 'active'"
+                      @click="dubVoiceProviderMode = 'current'"
+                    >{{ lockedAudioProvider || '当前' }}</button>
+                    <button
+                      class="btn btn-ghost btn-xs"
+                      :class="dubVoiceProviderMode === 'edge-tts' && 'active'"
+                      @click="dubVoiceProviderMode = 'edge-tts'"
+                    >Edge-TTS 免费</button>
+                  </div>
+                  <span class="dim" style="font-size:11px;margin-left:auto">{{ dubVoiceList.length }} 种音色</span>
+                </div>
+                <div class="dub-voice-grid">
+                  <div
+                    v-for="voice in dubVoiceList"
+                    :key="voice.id"
+                    class="dub-voice-chip"
+                    :class="{ selected: activeVoiceId === voice.id }"
+                    @click="activeVoiceId = voice.id"
+                  >
+                    <span class="dub-voice-chip-name">{{ voice.label }}</span>
+                    <span class="tag tag-xs">{{ voice.gender }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Dub Cards -->
+              <div class="dub-grid">
                 <div v-for="(sb, i) in sbs.filter(hasDialogue)" :key="sb.id" class="card dub-card">
                   <div class="dub-head">
                     <div class="dub-copy">
@@ -855,6 +889,21 @@
                   <span class="dim">{{ sb.duration || 10 }}s</span>
                   <span class="dim">{{ sb.location || '未设地点' }}</span>
                 </div>
+                <div class="dub-voice-row">
+                  <BaseSelect
+                    :options="voiceSelectOptions"
+                    :model-value="shotVoiceSelections[sb.id] || ''"
+                    @update:model-value="setShotVoice(sb.id, $event)"
+                    placeholder="选择音色（默认角色音色）"
+                    searchable
+                  />
+                  <button
+                    class="btn btn-ghost btn-xs"
+                    title="使用面板中选择的音色"
+                    @click="setShotVoice(sb.id, activeVoiceId)"
+                    :disabled="!activeVoiceId"
+                  >+</button>
+                </div>
                 <div class="dub-foot">
                   <audio v-if="hasTTS(sb)" :src="'/' + getTTSUrl(sb)" controls preload="none" class="dub-audio" />
                   <div v-else class="dim" style="font-size:12px">尚未生成语音文件</div>
@@ -862,6 +911,7 @@
                 </div>
               </div>
             </div>
+            </template>
           </div>
 
           <!-- Sub: Shots -->
@@ -1482,6 +1532,14 @@ const fallbackVoiceProfiles = [
 ]
 const voiceProfiles = ref(fallbackVoiceProfiles)
 const voiceSelectOptions = computed(() => voiceProfiles.value.map(v => ({ label: `${v.label} · ${v.traits}`, value: v.id })))
+const shotVoiceSelections = ref({})
+const activeVoiceId = ref(localStorage.getItem('activeVoiceId') || '')
+const dubVoiceProviderMode = ref(localStorage.getItem('dubVoiceProviderMode') || 'current')
+const dubEdgeVoices = ref([])
+const dubVoiceList = computed(() => {
+  if (dubVoiceProviderMode.value === 'edge-tts') return dubEdgeVoices.value
+  return voiceProfiles.value
+})
 const videoConfigSelectOptions = computed(() => videoConfigs.value.map(c => {
   let modelName = ''
   try { const m = JSON.parse(c.model || '[]'); modelName = Array.isArray(m) ? (m[0] || '') : (m || '') } catch { modelName = c.model || '' }
@@ -2478,6 +2536,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+// Legacy polling helper — still used by video polling fallback
 function watchAsyncResult(check, attempts = 24, delay = 2500) {
   void (async () => {
     for (let i = 0; i < attempts; i++) {
@@ -2488,18 +2547,39 @@ function watchAsyncResult(check, attempts = 24, delay = 2500) {
   })()
 }
 
+async function pollImageGeneration(generationId, entityId, pendingArray, label) {
+  for (let i = 0; i < 120; i++) {
+    await sleep(4000)
+    try {
+      const res = await imageAPI.getStatus(generationId)
+      await refresh()
+      if (res?.status === 'completed') {
+        pendingArray.value = pendingArray.value.filter(item => item !== entityId)
+        toast.success(`${label} 生成完成`)
+        return
+      }
+      if (res?.status === 'failed') {
+        pendingArray.value = pendingArray.value.filter(item => item !== entityId)
+        toast.error(res?.error_msg || res?.errorMsg || `${label} 生成失败`)
+        return
+      }
+    } catch {}
+  }
+  pendingArray.value = pendingArray.value.filter(item => item !== entityId)
+  toast.error(`${label} 生成超时`)
+}
+
 async function genCharImg(id) {
   try {
     if (!isPendingCharImage(id)) pendingCharImageIds.value.push(id)
-    await characterAPI.generateImage(id, epId.value)
+    const res = await characterAPI.generateImage(id, epId.value)
     toast.success('角色图片生成中')
-    await refresh()
-    watchAsyncResult(() => {
-      const char = chars.value.find(c => c.id === id)
-      const done = !!(char?.image_url || char?.imageUrl)
-      if (done) pendingCharImageIds.value = pendingCharImageIds.value.filter(item => item !== id)
-      return done
-    })
+    const genId = res?.image_generation_id
+    if (genId) {
+      pollImageGeneration(genId, id, pendingCharImageIds, '角色图片')
+    } else {
+      await refresh()
+    }
   } catch (e) {
     pendingCharImageIds.value = pendingCharImageIds.value.filter(item => item !== id)
     toast.error(e.message)
@@ -2509,15 +2589,17 @@ function batchCharImages() {
   const ids = visualChars.value.filter(c => !(c.image_url || c.imageUrl)).map(c => c.id)
   if (!ids.length) { toast.info('所有角色图片已生成'); return }
   pendingCharImageIds.value = [...new Set([...pendingCharImageIds.value, ...ids])]
-  characterAPI.batchImages(ids, epId.value).then(async () => {
+  characterAPI.batchImages(ids, epId.value).then(async (res) => {
     toast.success('角色图片批量生成中')
-    await refresh()
-    watchAsyncResult(() => ids.every(id => {
-      const char = chars.value.find(c => c.id === id)
-      const done = !!(char?.image_url || char?.imageUrl)
-      if (done) pendingCharImageIds.value = pendingCharImageIds.value.filter(item => item !== id)
-      return done
-    }), 36)
+    const genIds = res?.ids || []
+    if (genIds.length) {
+      // Poll each generation in parallel
+      genIds.forEach(genId => {
+        pollImageGeneration(genId, ids[genIds.indexOf(genId)] || ids[0], pendingCharImageIds, '角色图片')
+      })
+    } else {
+      await refresh()
+    }
   }).catch(e => {
     pendingCharImageIds.value = pendingCharImageIds.value.filter(item => !ids.includes(item))
     toast.error(e.message)
@@ -2526,15 +2608,14 @@ function batchCharImages() {
 async function genSceneImg(id) {
   try {
     if (!isPendingSceneImage(id)) pendingSceneImageIds.value.push(id)
-    await sceneAPI.generateImage(id, epId.value)
+    const res = await sceneAPI.generateImage(id, epId.value)
     toast.success('场景图片生成中')
-    await refresh()
-    watchAsyncResult(() => {
-      const scene = scenes.value.find(s => s.id === id)
-      const done = !!(scene?.image_url || scene?.imageUrl)
-      if (done) pendingSceneImageIds.value = pendingSceneImageIds.value.filter(item => item !== id)
-      return done
-    })
+    const genId = res?.image_generation_id
+    if (genId) {
+      pollImageGeneration(genId, id, pendingSceneImageIds, '场景图片')
+    } else {
+      await refresh()
+    }
   } catch (e) {
     pendingSceneImageIds.value = pendingSceneImageIds.value.filter(item => item !== id)
     toast.error(e.message)
@@ -2544,14 +2625,19 @@ function batchSceneImages() {
   const ids = scenes.value.filter(s => !(s.image_url || s.imageUrl)).map(s => s.id)
   if (!ids.length) { toast.info('所有场景图片已生成'); return }
   pendingSceneImageIds.value = [...new Set([...pendingSceneImageIds.value, ...ids])]
-  ids.forEach(id => { sceneAPI.generateImage(id, epId.value).then(() => refresh()).catch(e => toast.error(e.message)) })
   toast.success('场景图片批量生成中')
-  watchAsyncResult(() => ids.every(id => {
-    const scene = scenes.value.find(s => s.id === id)
-    const done = !!(scene?.image_url || scene?.imageUrl)
-    if (done) pendingSceneImageIds.value = pendingSceneImageIds.value.filter(item => item !== id)
-    return done
-  }), 36)
+  Promise.allSettled(ids.map(id => sceneAPI.generateImage(id, epId.value))).then(results => {
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        const genId = r.value?.image_generation_id
+        if (genId) pollImageGeneration(genId, ids[i], pendingSceneImageIds, '场景图片')
+      } else {
+        pendingSceneImageIds.value = pendingSceneImageIds.value.filter(item => item !== ids[i])
+        toast.error(r.reason?.message || '场景图片生成失败')
+      }
+    })
+    refresh()
+  })
 }
 
 const IGNORE_TTS_SPEAKERS = /^(环境音|环境声|音效|效果音|sfx|sound ?effect|bgm|背景音|背景音乐|ambient)$/i
@@ -2586,9 +2672,16 @@ function getDialogueSpeaker(sb) {
   if (!speaker) return '旁白'
   return speaker
 }
+function setShotVoice(sbId, voiceId) {
+  shotVoiceSelections.value[sbId] = voiceId
+}
+function getShotVoice(sb) {
+  return shotVoiceSelections.value[sb.id] || activeVoiceId.value || null
+}
 async function genShotTTS(sb) {
   try {
-    await storyboardAPI.generateTTS(sb.id)
+    const voiceId = getShotVoice(sb)
+    await storyboardAPI.generateTTS(sb.id, voiceId)
     toast.success(`镜头 #${sb.storyboard_number || sb.storyboardNumber || sb.id} 配音已生成`)
     await refresh()
   } catch (e) { toast.error(e.message) }
@@ -2599,7 +2692,10 @@ async function batchShotTTS() {
     toast.info(ttsEligibleCount.value ? '所有镜头配音已生成' : '当前没有可生成的对白或旁白')
     return
   }
-  const results = await Promise.allSettled(pending.map(sb => storyboardAPI.generateTTS(sb.id)))
+  const results = await Promise.allSettled(pending.map(sb => {
+    const voiceId = getShotVoice(sb)
+    return storyboardAPI.generateTTS(sb.id, voiceId)
+  }))
   const okCount = results.filter(r => r.status === 'fulfilled').length
   const failCount = results.length - okCount
   if (okCount) toast.success(`已生成 ${okCount} 条镜头配音`)
@@ -2682,15 +2778,14 @@ async function genShotFrame(sb, frameType) {
       frame_type: frameType,
       reference_images: referenceImages.length ? referenceImages : undefined,
     }
-    await imageAPI.generate(body)
+    const res = await imageAPI.generate(body)
     toast.success(frameType === 'first_frame' ? '首帧生成中' : '尾帧生成中')
-    await refresh()
-    watchAsyncResult(() => {
-      const target = sbs.value.find(s => s.id === sb.id)
-      const done = frameType === 'first_frame' ? !!getFirstFrame(target) : !!getLastFrame(target)
-      if (done) pendingShotFrameKeys.value = pendingShotFrameKeys.value.filter(item => item !== key)
-      return done
-    })
+    const genId = res?.id
+    if (genId) {
+      pollImageGeneration(genId, key, pendingShotFrameKeys, frameType === 'first_frame' ? '首帧' : '尾帧')
+    } else {
+      await refresh()
+    }
   } catch (e) {
     pendingShotFrameKeys.value = pendingShotFrameKeys.value.filter(item => item !== key)
     toast.error(e.message)
@@ -2879,14 +2974,78 @@ async function loadVoices() {
   try {
     const provider = lockedAudioProvider.value || 'minimax'
     const rows = await voicesAPI.list(provider)
-    voiceProfiles.value = rows?.length ? rows.map(mapVoiceProfile) : fallbackVoiceProfiles
+    if (rows?.length) {
+      voiceProfiles.value = rows.map(mapVoiceProfile)
+      return
+    }
+    // Edge-TTS: 客户端直接加载音色列表
+    if (provider === 'edge-tts') {
+      const { listVoices } = await import('edge-tts-universal')
+      const all = await listVoices()
+      // 只保留中文相关音色
+      const zhVoices = all.filter(v => v.Locale && (v.Locale.startsWith('zh') || v.Locale.startsWith('cn')))
+      if (zhVoices.length) {
+        voiceProfiles.value = zhVoices.map(v => ({
+          id: v.ShortName,
+          label: v.DisplayName || v.LocalName || v.ShortName,
+          gender: v.Gender === 'Female' ? '女声' : v.Gender === 'Male' ? '男声' : '中性',
+          traits: `${v.Locale} · ${v.LocalName || ''}`,
+          suitable: '通用角色',
+        }))
+        return
+      }
+    }
+    voiceProfiles.value = fallbackVoiceProfiles
   } catch (e) {
     console.error('Failed to load voices', e)
+    // edge-tts fallback: 硬编码中文音色
+    if (lockedAudioProvider.value === 'edge-tts') {
+      voiceProfiles.value = [
+        { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女）', gender: '女声', traits: '温柔自然', suitable: '通用角色、旁白' },
+        { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女）', gender: '女声', traits: '知性优雅', suitable: '成熟女性、旁白' },
+        { id: 'zh-CN-YunjianNeural', label: '云健（男）', gender: '男声', traits: '成熟稳重', suitable: '成熟男性、旁白' },
+        { id: 'zh-CN-YunxiNeural', label: '云希（男）', gender: '男声', traits: '阳光活力', suitable: '年轻男性、主角' },
+        { id: 'zh-CN-YunxiaNeural', label: '云夏（男）', gender: '男声', traits: '开朗热情', suitable: '活力角色' },
+        { id: 'zh-CN-YunyangNeural', label: '云扬（男）', gender: '男声', traits: '温暖亲和', suitable: '温暖角色' },
+      ]
+      return
+    }
     voiceProfiles.value = fallbackVoiceProfiles
   }
 }
 
+async function loadDubEdgeVoices() {
+  if (dubEdgeVoices.value.length) return
+  try {
+    const { listVoices } = await import('edge-tts-universal')
+    const all = await listVoices()
+    const zhVoices = all.filter(v => v.Locale && (v.Locale.startsWith('zh') || v.Locale.startsWith('cn')))
+    if (zhVoices.length) {
+      dubEdgeVoices.value = zhVoices.map(v => ({
+        id: v.ShortName,
+        label: v.DisplayName || v.LocalName || v.ShortName,
+        gender: v.Gender === 'Female' ? '女声' : v.Gender === 'Male' ? '男声' : '中性',
+        traits: `${v.Locale} · ${v.LocalName || ''}`,
+        suitable: '通用角色',
+      }))
+      return
+    }
+    throw new Error('No Chinese voices found')
+  } catch (e) {
+    dubEdgeVoices.value = [
+      { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女）', gender: '女声', traits: 'zh-CN · 中文', suitable: '通用角色、旁白' },
+      { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女）', gender: '女声', traits: 'zh-CN · 中文', suitable: '成熟女性、旁白' },
+      { id: 'zh-CN-YunjianNeural', label: '云健（男）', gender: '男声', traits: 'zh-CN · 中文', suitable: '成熟男性、旁白' },
+      { id: 'zh-CN-YunxiNeural', label: '云希（男）', gender: '男声', traits: 'zh-CN · 中文', suitable: '年轻男性、主角' },
+      { id: 'zh-CN-YunxiaNeural', label: '云夏（男）', gender: '男声', traits: 'zh-CN · 中文', suitable: '活力角色' },
+      { id: 'zh-CN-YunyangNeural', label: '云扬（男）', gender: '男声', traits: 'zh-CN · 中文', suitable: '温暖角色' },
+    ]
+  }
+}
+
 watch([lockedAudioConfigId, audioConfigs], () => { loadVoices() }, { deep: true })
+watch(dubVoiceProviderMode, (mode) => { localStorage.setItem('dubVoiceProviderMode', mode); if (mode === 'edge-tts' && !dubEdgeVoices.value.length) loadDubEdgeVoices() })
+watch(activeVoiceId, (id) => { localStorage.setItem('activeVoiceId', id) })
 onMounted(() => { refresh(); loadConfigs(); loadVoices() })
 </script>
 
@@ -3618,8 +3777,23 @@ onMounted(() => { refresh(); loadConfigs(); loadVoices() })
 .dub-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dub-desc { font-size: 13px; line-height: 1.6; color: var(--text-1); }
 .dub-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11px; }
+.dub-voice-row { display: flex; align-items: center; gap: 8px; }
+.dub-voice-row :deep(.base-select) { width: 100%; }
 .dub-foot { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid rgba(27, 41, 64, 0.08); }
 .dub-audio { flex: 1; min-width: 0; height: 30px; }
+
+/* Voice Palette */
+.dub-voice-palette { background: var(--bg-2); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.dub-voice-palette-head { display: flex; align-items: center; gap: 8px; }
+.dub-voice-toggle { display: flex; gap: 2px; background: var(--bg-1); border-radius: 8px; padding: 2px; }
+.dub-voice-toggle .btn-ghost { font-size: 11px; padding: 4px 10px; border-radius: 6px; border: none; color: var(--text-2); cursor: pointer; transition: all 0.15s; }
+.dub-voice-toggle .btn-ghost.active { background: var(--accent); color: #fff; }
+.dub-voice-grid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 180px; overflow-y: auto; padding: 2px 0; }
+.dub-voice-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 8px; background: var(--bg-1); border: 1px solid transparent; cursor: pointer; transition: all 0.15s; font-size: 12px; }
+.dub-voice-chip:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-1)); }
+.dub-voice-chip.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-1)); }
+.dub-voice-chip-name { color: var(--text-1); font-weight: 500; }
+.dub-voice-chip .tag-xs { font-size: 10px; padding: 1px 5px; border-radius: 4px; line-height: 1.4; }
 
 /* Asset grid */
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }

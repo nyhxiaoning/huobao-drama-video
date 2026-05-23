@@ -51,7 +51,9 @@ export function getTTSAdapter(provider: string): TTSProviderAdapter {
  * @returns 对应的 Adapter，未知厂商返回 MiniMax 默认
  */
 export function getImageAdapter(provider: string): ImageProviderAdapter {
-  return imageAdapters[provider.toLowerCase()] || imageAdapters['minimax']
+  const adapter = imageAdapters[provider.toLowerCase()]
+  if (!adapter) throw new Error(`图片生成暂不支持 ${provider}，请切换到 Gemini、ChatFire、火山引擎或百炼`)
+  return adapter
 }
 
 /**

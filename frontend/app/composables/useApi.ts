@@ -55,7 +55,7 @@ export const episodeAPI = {
 export const storyboardAPI = {
   create: (data: any) => api.post('/storyboards', data),
   update: (id: number, data: any) => api.put(`/storyboards/${id}`, data),
-  generateTTS: (id: number) => api.post(`/storyboards/${id}/generate-tts`),
+  generateTTS: (id: number, voice?: string | null) => api.post(`/storyboards/${id}/generate-tts`, voice ? { voice } : undefined),
   del: (id: number) => api.del(`/storyboards/${id}`),
 }
 
@@ -72,6 +72,7 @@ export const sceneAPI = {
 
 export const imageAPI = {
   generate: (d: any) => api.post('/images', d),
+  getStatus: (id: number) => api.get(`/images/${id}`),
   list: (params?: { drama_id?: number; storyboard_id?: number }) => {
     const query = new URLSearchParams()
     if (params?.drama_id) query.set('drama_id', String(params.drama_id))

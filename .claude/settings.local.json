@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w '%{http_code}' -X POST https://api.klingai.com/v1/images/generations -H 'Content-Type: application/json' -H 'Authorization: Bearer test' -d '{}')"
+    ]
+  }
+}

@@ -3,11 +3,25 @@
 1.前端项目，不要使用pnpm，使用npm安装
 ```bash
 
-
+node20版本
+注意：前后端项目，需要都启动
 ```
 
 
+## 2.API调用
+### ali
+测试一下：
+```
+API Key所属地域的Base URL：
 
+华北2（北京）：https://dashscope.aliyuncs.com/compatible-mode/v1
+
+新加坡：https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+
+美国（弗吉尼亚）：https://dashscope-us.aliyuncs.com/compatible-mode/v1
+
+
+```
 
 
 <div align="center">
