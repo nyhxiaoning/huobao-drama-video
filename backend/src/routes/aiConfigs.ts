@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
+import { createHmac, createHash } from 'node:crypto'
 import { db, schema } from '../db/index.js'
 import { success, notFound, created, badRequest, now } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
@@ -49,7 +50,29 @@ function viduHeaders(apiKey?: string, withJson = false) {
   return headers
 }
 
-function buildProbe(serviceType: string, provider: string, baseUrl: string, model?: string, apiKey?: string) {
+function klingAuthHeaders(accessKey: string, secretKey: string, method: string, urlStr: string, body?: any) {
+  const url = new URL(urlStr)
+  const ts = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+
+  const canonicalUri = url.pathname
+  const canonicalQuery = url.searchParams.toString() || ''
+  const payloadHash = createHash('sha256').update(body ? JSON.stringify(body) : '').digest('hex')
+  const canonicalHeaders = `content-type:application/json\nhost:${url.hostname}\n`
+  const signedHeaders = 'content-type;host'
+  const canonicalRequest = `${method}\n${canonicalUri}\n${canonicalQuery}\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`
+
+  const algorithm = 'KLING-V1-HMAC-SHA256'
+  const canonicalRequestHash = createHash('sha256').update(canonicalRequest).digest('hex')
+  const stringToSign = `${algorithm}\n${ts}\n${canonicalRequestHash}`
+  const signature = createHmac('sha256', secretKey).update(stringToSign).digest('base64')
+
+  return {
+    Authorization: `Kling ${accessKey}:${signature}`,
+    'Content-Type': 'application/json',
+  }
+}
+
+function buildProbe(serviceType: string, provider: string, baseUrl: string, model?: string, apiKey?: string, secretKey?: string) {
   const p = provider.toLowerCase()
   const m = model || ''
 
@@ -59,7 +82,7 @@ function buildProbe(serviceType: string, provider: string, baseUrl: string, mode
     return { method: 'POST', url: url.toString(), headers: geminiHeaders(apiKey, true), body: {} }
   }
 
-  if (p === 'openai' || p === 'openrouter' || p === 'chatfire') {
+  if (p === 'openai' || p === 'openrouter' || p === 'chatfire' || p === 'deepseek' || p === 'moonshot' || p === 'bailian') {
     return {
       method: 'GET',
       url: joinProviderUrl(baseUrl, '/v1', '/models'),
@@ -114,6 +137,15 @@ function buildProbe(serviceType: string, provider: string, baseUrl: string, mode
     }
   }
 
+  if (p === 'kling') {
+    return {
+      method: 'POST',
+      url: joinProviderUrl(baseUrl, '/v1', '/images/generations'),
+      headers: bearerHeaders(apiKey, true),
+      body: {},
+    }
+  }
+
   return {
     method: 'GET',
     url: joinProviderUrl(baseUrl, '', m ? `/${m}` : '/'),
@@ -131,6 +163,7 @@ app.get('/', async (c) => {
   const parsed = rows.map(r => ({
     ...toSnakeCase(r),
     model: r.model ? JSON.parse(r.model) : [],
+    settings: r.settings ? JSON.parse(r.settings) : null,
   }))
   return success(c, parsed)
 })
@@ -153,6 +186,7 @@ app.post('/', async (c) => {
     apiKey: body.api_key || '',
     model: JSON.stringify(body.model || []),
     priority: body.priority || 0,
+    settings: body.settings ? JSON.stringify(body.settings) : undefined,
     isActive: true,
     createdAt: ts,
     updatedAt: ts,
@@ -164,6 +198,7 @@ app.post('/', async (c) => {
   return created(c, {
     ...toSnakeCase(row),
     model: row.model ? JSON.parse(row.model) : [],
+    settings: row.settings ? JSON.parse(row.settings) : null,
   })
 })
 
@@ -255,7 +290,7 @@ app.post('/test', async (c) => {
   }
 
   const model = Array.isArray(body.model) ? body.model[0] : body.model
-  const probe = buildProbe(body.service_type, body.provider, body.base_url, model, body.api_key)
+  const probe = buildProbe(body.service_type, body.provider, body.base_url, model, body.api_key, body.secret_key)
   const probeUrl = redactUrl(probe.url)
 
   logTaskProgress('AIConfig', 'probe-start', {
@@ -324,6 +359,7 @@ app.get('/:id', async (c) => {
   return success(c, {
     ...toSnakeCase(row),
     model: row.model ? JSON.parse(row.model) : [],
+    settings: row.settings ? JSON.parse(row.settings) : null,
   })
 })
 
@@ -340,6 +376,7 @@ app.put('/:id', async (c) => {
   if ('model' in body) updates.model = JSON.stringify(body.model)
   if ('priority' in body) updates.priority = body.priority
   if ('is_active' in body) updates.isActive = body.is_active
+  if ('settings' in body) updates.settings = JSON.stringify(body.settings)
 
   db.update(schema.aiServiceConfigs).set(updates).where(eq(schema.aiServiceConfigs.id, id)).run()
   return success(c)
