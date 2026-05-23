@@ -45,43 +45,61 @@ export async function generateTTS(params: TTSParams): Promise<string> {
     params,
   })
 
-  const { url, method, headers, body } = adapter.buildGenerateRequest(config, params)
-  logTaskProgress('AudioTask', 'request', {
-    provider: config.provider,
-    voice: params.voice,
-    method,
-    url: redactUrl(url),
-    model: params.model || config.model,
-  })
-  logTaskPayload('AudioTask', 'request payload', {
-    method,
-    url,
-    headers,
-    body,
-  })
-
-  const resp = await fetch(url, {
-    method,
-    headers,
-    body: JSON.stringify(body),
-  })
-
-  if (!resp.ok) {
-    const errText = await resp.text()
-    logTaskError('AudioTask', 'tts-generate', { provider: config.provider, voice: params.voice, status: resp.status, error: errText })
-    throw new Error(`TTS API error ${resp.status}: ${errText}`)
+  // 支持 Adapter 直接合成（Edge-TTS 等非 HTTP 供应商）
+  let result: {
+    audioHex: string
+    audioLength: number
+    sampleRate: number
+    bitrate: number
+    format: string
+    channel: number
   }
 
-  const result = await resp.json()
-  const parsed = adapter.parseResponse(result)
+  if (adapter.synthesize) {
+    result = await adapter.synthesize(config, params)
+    logTaskProgress('AudioTask', 'direct-synthesize', {
+      provider: config.provider,
+      voice: params.voice,
+    })
+  } else {
+    const { url, method, headers, body } = adapter.buildGenerateRequest(config, params)
+    logTaskProgress('AudioTask', 'request', {
+      provider: config.provider,
+      voice: params.voice,
+      method,
+      url: redactUrl(url),
+      model: params.model || config.model,
+    })
+    logTaskPayload('AudioTask', 'request payload', {
+      method,
+      url,
+      headers,
+      body,
+    })
+
+    const resp = await fetch(url, {
+      method,
+      headers,
+      body: JSON.stringify(body),
+    })
+
+    if (!resp.ok) {
+      const errText = await resp.text()
+      logTaskError('AudioTask', 'tts-generate', { provider: config.provider, voice: params.voice, status: resp.status, error: errText })
+      throw new Error(`TTS API error ${resp.status}: ${errText}`)
+    }
+
+    const json = await resp.json()
+    result = adapter.parseResponse(json)
+  }
 
   // 将 hex 解码为二进制
-  const buffer = Buffer.from(parsed.audioHex, 'hex')
+  const buffer = Buffer.from(result.audioHex, 'hex')
 
   // 保存到本地
   const audioDir = path.join(STORAGE_ROOT, 'audio')
   fs.mkdirSync(audioDir, { recursive: true })
-  const filename = `${uuid()}.${parsed.format || 'mp3'}`
+  const filename = `${uuid()}.${result.format || 'mp3'}`
   const filePath = path.join(audioDir, filename)
   fs.writeFileSync(filePath, buffer)
 
@@ -91,7 +109,7 @@ export async function generateTTS(params: TTSParams): Promise<string> {
     voice: params.voice,
     path: relativePath,
     bytes: buffer.length,
-    audioMs: parsed.audioLength,
+    audioMs: result.audioLength,
   })
   return relativePath
 }

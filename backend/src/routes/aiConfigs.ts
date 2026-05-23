@@ -146,6 +146,18 @@ function buildProbe(serviceType: string, provider: string, baseUrl: string, mode
     }
   }
 
+  if (p === 'edge-tts') {
+    return { method: 'GET', url: 'https://speech.platform.bing.com/', headers: { 'Content-Type': 'application/json' }, body: undefined }
+  }
+
+  if (p === 'tencent-tts') {
+    return { method: 'POST', url: joinProviderUrl(baseUrl, '', '/'), headers: bearerHeaders(apiKey, true), body: {} }
+  }
+
+  if (p === 'ali-tts') {
+    return { method: 'POST', url: joinProviderUrl(baseUrl, '/v1', '/audio/speech'), headers: bearerHeaders(apiKey, true), body: {} }
+  }
+
   return {
     method: 'GET',
     url: joinProviderUrl(baseUrl, '', m ? `/${m}` : '/'),
@@ -285,7 +297,8 @@ app.post('/huobao-preset', async (c) => {
 // POST /ai-configs/test
 app.post('/test', async (c) => {
   const body = await c.req.json()
-  if (!body.service_type || !body.provider || !body.base_url) {
+  const isEdgeTts = body.provider === 'edge-tts'
+  if (!body.service_type || !body.provider || (!body.base_url && !isEdgeTts)) {
     return badRequest(c, 'service_type, provider and base_url are required')
   }
 

@@ -73,6 +73,7 @@ export interface AIConfig {
   baseUrl: string
   apiKey: string
   model: string
+  settings?: Record<string, any> | null
 }
 
 export interface ImageGenerationRecord {
@@ -140,4 +141,18 @@ export interface TTSProviderAdapter {
     format: string
     channel: number
   }
+
+  /**
+   * 直接合成（免 HTTP 请求）
+   * 适用于 Edge-TTS 等基于 WebSocket 的供应商
+   * 如果不实现，走标准 HTTP 流程（buildGenerateRequest → fetch → parseResponse）
+   */
+  synthesize?(config: AIConfig, params: any): Promise<{
+    audioHex: string
+    audioLength: number
+    sampleRate: number
+    bitrate: number
+    format: string
+    channel: number
+  }>
 }

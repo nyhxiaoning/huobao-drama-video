@@ -11,6 +11,7 @@ import { db, schema } from '../db/index.js'
 import { eq } from 'drizzle-orm'
 import { now } from '../utils/response.js'
 import { generateTTS } from './tts-generation.js'
+import { resolveVoice } from './resolve-voice.js'
 import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -81,7 +82,7 @@ export async function composeStoryboard(storyboardId: number): Promise<string> {
       }
 
       if (!audioPath) {
-        let voiceId = 'alloy'
+        let voiceId: string | null = null
         const [ep] = db.select().from(schema.episodes).where(eq(schema.episodes.id, sb.episodeId)).all()
         if (parsedDialogue.speaker) {
           const charName = parsedDialogue.speaker
@@ -92,6 +93,7 @@ export async function composeStoryboard(storyboardId: number): Promise<string> {
             if (found?.voiceStyle) voiceId = found.voiceStyle
           }
         }
+        voiceId = resolveVoice(voiceId, ep?.audioConfigId)
 
         const pureDialogue = parsedDialogue.pureText
         if (pureDialogue) {

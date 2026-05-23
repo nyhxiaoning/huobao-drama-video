@@ -5,6 +5,7 @@
 import { MiniMaxImageAdapter } from './minimax-image'
 import { MiniMaxVideoAdapter } from './minimax-video'
 import { MiniMaxTTSAdapter } from './minimax-tts'
+import { EdgeTTSTTSAdapter } from './edge-tts'
 import { OpenAIImageAdapter } from './openai-image'
 import { GeminiImageAdapter } from './gemini-image'
 import { VolcEngineImageAdapter } from './volcengine-image'
@@ -37,6 +38,7 @@ export const videoAdapters: Record<string, VideoProviderAdapter> = {
 // TTS Adapter 注册表
 export const ttsAdapters: Record<string, TTSProviderAdapter> = {
   minimax: new MiniMaxTTSAdapter(),
+  'edge-tts': new EdgeTTSTTSAdapter(),
 }
 
 export function getTTSAdapter(provider: string): TTSProviderAdapter {

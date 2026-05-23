@@ -56,14 +56,7 @@ export function createVoiceTools(episodeId: number, dramaId: number) {
           language: v.language,
           provider,
         }
-      }) : [
-        { id: 'alloy', name: 'Alloy', gender: '中性', traits: '平衡自然', suitable_for: '旁白、通用', language: '多语言', provider },
-        { id: 'echo', name: 'Echo', gender: '男声', traits: '低沉稳重', suitable_for: '成熟男性、旁白', language: '多语言', provider },
-        { id: 'fable', name: 'Fable', gender: '男声', traits: '温暖富有表现力', suitable_for: '年轻男性、故事叙述', language: '多语言', provider },
-        { id: 'onyx', name: 'Onyx', gender: '男声', traits: '深沉有力', suitable_for: '权威角色、反派', language: '多语言', provider },
-        { id: 'nova', name: 'Nova', gender: '女声', traits: '温柔甜美', suitable_for: '年轻女性、女主', language: '多语言', provider },
-        { id: 'shimmer', name: 'Shimmer', gender: '女声', traits: '明亮活泼', suitable_for: '活泼女性、少女', language: '多语言', provider },
-      ]
+      }) : getProviderDefaultVoices(provider)
 
       const payload = {
         provider,
@@ -104,4 +97,31 @@ function inferGender(name: string, desc: unknown) {
   if (/[男|青年|大爷|学长|boy|man|male]/i.test(text)) return '男声'
   if (/[女|少女|御姐|奶奶|girl|woman|female]/i.test(text)) return '女声'
   return '中性'
+}
+
+function getProviderDefaultVoices(provider: string) {
+  const DEFAULTS: Record<string, Array<{ id: string; name: string; gender: string; traits: string; suitable_for: string; language: string; provider: string }>> = {
+    'edge-tts': [
+      { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓（女）', gender: '女声', traits: '温柔自然', suitable_for: '年轻女性、旁白', language: '中文', provider: 'edge-tts' },
+      { id: 'zh-CN-YunxiNeural', name: '云希（男）', gender: '男声', traits: '阳光活力', suitable_for: '年轻男性', language: '中文', provider: 'edge-tts' },
+      { id: 'zh-CN-YunjianNeural', name: '云健（男）', gender: '男声', traits: '成熟稳重', suitable_for: '成熟男性、旁白', language: '中文', provider: 'edge-tts' },
+    ],
+    'minimax': [
+      { id: 'ZhiMei', name: '智美（女）', gender: '女声', traits: '温柔甜美', suitable_for: '年轻女性', language: '中文', provider: 'minimax' },
+      { id: 'ZhiQi', name: '智琪（女）', gender: '女声', traits: '知性优雅', suitable_for: '成熟女性', language: '中文', provider: 'minimax' },
+      { id: 'ZhiJie', name: '智杰（男）', gender: '男声', traits: '沉稳有力', suitable_for: '成熟男性', language: '中文', provider: 'minimax' },
+    ],
+    'tencent-tts': [
+      { id: 'ZhiMei', name: '智美（女）', gender: '女声', traits: '温柔甜美', suitable_for: '年轻女性', language: '中文', provider: 'tencent-tts' },
+      { id: 'ZhiJie', name: '智杰（男）', gender: '男声', traits: '沉稳有力', suitable_for: '成熟男性', language: '中文', provider: 'tencent-tts' },
+    ],
+    'ali-tts': [
+      { id: 'longxiaochun', name: '龙小春（女）', gender: '女声', traits: '温柔自然', suitable_for: '年轻女性', language: '中文', provider: 'ali-tts' },
+      { id: 'longxiaosheng', name: '龙小生（男）', gender: '男声', traits: '阳光活力', suitable_for: '年轻男性', language: '中文', provider: 'ali-tts' },
+    ],
+  }
+  return DEFAULTS[provider] || [
+    { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓（女）', gender: '女声', traits: '温柔自然', suitable_for: '通用', language: '中文', provider },
+    { id: 'zh-CN-YunxiNeural', name: '云希（男）', gender: '男声', traits: '阳光活力', suitable_for: '通用', language: '中文', provider },
+  ]
 }

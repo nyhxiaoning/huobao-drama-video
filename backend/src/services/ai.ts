@@ -13,6 +13,7 @@ export interface AIConfig {
   baseUrl: string
   apiKey: string
   model: string
+  settings?: Record<string, any> | null
 }
 
 export function getTextProviderBaseUrl(config: AIConfig) {
@@ -47,6 +48,8 @@ export function getActiveConfig(serviceType: ServiceType): AIConfig | null {
   }
 
   const models = active.model ? JSON.parse(active.model) : []
+  let settings: Record<string, any> | null = null
+  try { if (active.settings) settings = JSON.parse(active.settings) } catch {}
   logTaskProgress('AIConfig', 'active-config-selected', {
     serviceType,
     configId: active.id,
@@ -59,6 +62,7 @@ export function getActiveConfig(serviceType: ServiceType): AIConfig | null {
     baseUrl: active.baseUrl,
     apiKey: active.apiKey,
     model: models[0] || '',
+    settings,
   }
 }
 
@@ -90,6 +94,8 @@ export function getConfigById(id: number): AIConfig | null {
     return null
   }
   const models = row.model ? JSON.parse(row.model) : []
+  let settings: Record<string, any> | null = null
+  try { if (row.settings) settings = JSON.parse(row.settings) } catch {}
   logTaskProgress('AIConfig', 'config-by-id-selected', {
     configId: id,
     provider: row.provider,
@@ -101,5 +107,6 @@ export function getConfigById(id: number): AIConfig | null {
     baseUrl: row.baseUrl,
     apiKey: row.apiKey,
     model: models[0] || '',
+    settings,
   }
 }
