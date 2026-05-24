@@ -9,6 +9,9 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare"
   },
+  "overrides": {
+    "destr": "^2.0.0"
+  },
   "dependencies": {
     "edge-tts-universal": "^1.4.0",
     "lucide-vue-next": "^0.511.0",
